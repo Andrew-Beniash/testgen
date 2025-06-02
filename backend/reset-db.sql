@@ -1,76 +1,46 @@
--- Initialize the Test Generation Agent Database
--- This file is automatically executed when the PostgreSQL container starts
+-- Simple database reset and initialization script
+-- This drops and recreates the schema cleanly
 
--- Enable required extensions for the Test Generation Agent
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
--- Try to create vector extension, but don't fail if it doesn't exist
--- The vector extension is needed for pgvector support but may not be available in all PostgreSQL images
-DO $$
-BEGIN
-    CREATE EXTENSION IF NOT EXISTS "vector" CASCADE;
-    RAISE NOTICE 'Vector extension enabled successfully';
-EXCEPTION WHEN others THEN
-    RAISE NOTICE 'Vector extension not available - similarity search will use alternative methods';
-END
-$$;
-
--- Create application schema
-CREATE SCHEMA IF NOT EXISTS testgen;
+-- Drop schema and recreate
+DROP SCHEMA IF EXISTS testgen CASCADE;
+CREATE SCHEMA testgen;
 
 -- Set default schema for this session
 SET search_path TO testgen, public;
 
 -- Create enum types for the application
-DO $ BEGIN
-    CREATE TYPE processing_status AS ENUM (
-        'pending',
-        'processing', 
-        'completed',
-        'failed',
-        'queued_for_review'
-    );
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $;
+CREATE TYPE processing_status AS ENUM (
+    'pending',
+    'processing', 
+    'completed',
+    'failed',
+    'queued_for_review'
+);
 
-DO $ BEGIN
-    CREATE TYPE test_classification AS ENUM (
-        'manual',
-        'api_automation',
-        'ui_automation', 
-        'performance',
-        'security',
-        'integration'
-    );
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $;
+CREATE TYPE test_classification AS ENUM (
+    'manual',
+    'api_automation',
+    'ui_automation', 
+    'performance',
+    'security',
+    'integration'
+);
 
-DO $ BEGIN
-    CREATE TYPE confidence_level AS ENUM (
-        'low',
-        'medium', 
-        'high'
-    );
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $;
+CREATE TYPE confidence_level AS ENUM (
+    'low',
+    'medium', 
+    'high'
+);
 
-DO $ BEGIN
-    CREATE TYPE quality_rating AS ENUM (
-        'poor',
-        'fair',
-        'good',
-        'excellent'
-    );
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $;
+CREATE TYPE quality_rating AS ENUM (
+    'poor',
+    'fair',
+    'good',
+    'excellent'
+);
 
 -- Core tables for user stories and test cases
-CREATE TABLE IF NOT EXISTS user_stories (
+CREATE TABLE user_stories (
     id SERIAL PRIMARY KEY,
     azure_devops_id VARCHAR(100) UNIQUE NOT NULL,
     title TEXT NOT NULL,
@@ -86,7 +56,7 @@ CREATE TABLE IF NOT EXISTS user_stories (
     processed_at TIMESTAMP WITH TIME ZONE
 );
 
-CREATE TABLE IF NOT EXISTS test_cases (
+CREATE TABLE test_cases (
     id SERIAL PRIMARY KEY,
     user_story_id INTEGER REFERENCES user_stories(id) ON DELETE CASCADE,
     azure_devops_id VARCHAR(100) UNIQUE,
@@ -105,7 +75,7 @@ CREATE TABLE IF NOT EXISTS test_cases (
 );
 
 -- Quality metrics table for tracking test case quality
-CREATE TABLE IF NOT EXISTS quality_metrics (
+CREATE TABLE quality_metrics (
     id SERIAL PRIMARY KEY,
     test_case_id INTEGER REFERENCES test_cases(id) ON DELETE CASCADE,
     overall_score DECIMAL(3,2) NOT NULL CHECK (overall_score BETWEEN 0 AND 1),
@@ -124,7 +94,7 @@ CREATE TABLE IF NOT EXISTS quality_metrics (
 );
 
 -- QA annotations table for human feedback
-CREATE TABLE IF NOT EXISTS qa_annotations (
+CREATE TABLE qa_annotations (
     id SERIAL PRIMARY KEY,
     test_case_id INTEGER REFERENCES test_cases(id) ON DELETE CASCADE,
     annotator_id VARCHAR(100) NOT NULL,
@@ -146,7 +116,7 @@ CREATE TABLE IF NOT EXISTS qa_annotations (
 );
 
 -- Learning contributions table for tracking AI improvements
-CREATE TABLE IF NOT EXISTS learning_contributions (
+CREATE TABLE learning_contributions (
     id SERIAL PRIMARY KEY,
     test_case_id INTEGER REFERENCES test_cases(id) ON DELETE CASCADE,
     annotation_id INTEGER REFERENCES qa_annotations(id) ON DELETE SET NULL,
@@ -163,7 +133,7 @@ CREATE TABLE IF NOT EXISTS learning_contributions (
 );
 
 -- Ground truth benchmark table for quality measurement
-CREATE TABLE IF NOT EXISTS ground_truth_benchmark (
+CREATE TABLE ground_truth_benchmark (
     id SERIAL PRIMARY KEY,
     user_story_id INTEGER REFERENCES user_stories(id) ON DELETE CASCADE,
     benchmark_story_content JSONB NOT NULL,
@@ -181,7 +151,7 @@ CREATE TABLE IF NOT EXISTS ground_truth_benchmark (
 );
 
 -- System health and monitoring tables
-CREATE TABLE IF NOT EXISTS system_health_log (
+CREATE TABLE system_health_log (
     id SERIAL PRIMARY KEY,
     component VARCHAR(50) NOT NULL,
     status VARCHAR(20) NOT NULL,
@@ -191,7 +161,7 @@ CREATE TABLE IF NOT EXISTS system_health_log (
 );
 
 -- Generation statistics table
-CREATE TABLE IF NOT EXISTS generation_statistics (
+CREATE TABLE generation_statistics (
     id SERIAL PRIMARY KEY,
     user_story_id INTEGER REFERENCES user_stories(id) ON DELETE CASCADE,
     generation_start TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -206,79 +176,21 @@ CREATE TABLE IF NOT EXISTS generation_statistics (
 );
 
 -- Create indexes for performance optimization
--- User stories indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_stories_azure_devops_id 
-ON user_stories (azure_devops_id);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_stories_status_created 
-ON user_stories (processing_status, created_at DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_stories_domain_complexity 
-ON user_stories (domain_classification, complexity_score DESC NULLS LAST);
-
--- Test cases indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_test_cases_user_story 
-ON test_cases (user_story_id, created_at DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_test_cases_classification 
-ON test_cases (classification, classification_confidence DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_test_cases_azure_devops_id 
-ON test_cases (azure_devops_id) WHERE azure_devops_id IS NOT NULL;
-
--- Quality metrics indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_quality_metrics_overall_score 
-ON quality_metrics (overall_score DESC, calculated_at DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_quality_metrics_test_case 
-ON quality_metrics (test_case_id, calculated_at DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_quality_metrics_validation 
-ON quality_metrics (validation_passed, confidence_level, overall_score DESC);
-
--- QA annotations indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_qa_annotations_test_case 
-ON qa_annotations (test_case_id, annotation_timestamp DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_qa_annotations_quality_rating 
-ON qa_annotations (overall_quality_rating, annotation_timestamp DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_qa_annotations_processing 
-ON qa_annotations (is_processed, annotation_timestamp) WHERE NOT is_processed;
-
--- Learning contributions indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_learning_contributions_type_impact 
-ON learning_contributions (contribution_type, quality_impact DESC NULLS LAST);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_learning_contributions_timestamp 
-ON learning_contributions (contribution_timestamp DESC);
-
--- Benchmark indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_benchmark_domain_complexity 
-ON ground_truth_benchmark (domain, complexity_level, quality_rating DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_benchmark_active_usage 
-ON ground_truth_benchmark (is_active, usage_count DESC) WHERE is_active = true;
-
--- System health indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_system_health_component_timestamp 
-ON system_health_log (component, timestamp DESC);
-
--- Generation statistics indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_generation_stats_user_story 
-ON generation_statistics (user_story_id, generation_start DESC);
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_generation_stats_performance 
-ON generation_statistics (generation_start DESC, processing_time_seconds, average_quality_score DESC);
+CREATE INDEX idx_user_stories_azure_devops_id ON user_stories (azure_devops_id);
+CREATE INDEX idx_user_stories_status_created ON user_stories (processing_status, created_at DESC);
+CREATE INDEX idx_test_cases_user_story ON test_cases (user_story_id, created_at DESC);
+CREATE INDEX idx_quality_metrics_test_case ON quality_metrics (test_case_id, calculated_at DESC);
+CREATE INDEX idx_qa_annotations_test_case ON qa_annotations (test_case_id, annotation_timestamp DESC);
+CREATE INDEX idx_system_health_component_timestamp ON system_health_log (component, timestamp DESC);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER AS $func$
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$func$ language 'plpgsql';
 
 -- Create triggers for updated_at columns
 CREATE TRIGGER update_user_stories_updated_at 
@@ -302,35 +214,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA testgen GRANT EXECUTE ON FUNCTIONS TO testgen
 
 -- Insert initial system health record
 INSERT INTO system_health_log (component, status, message) 
-VALUES ('database', 'healthy', 'Database initialized successfully')
-ON CONFLICT DO NOTHING;
-
--- Create a view for test case quality summary
-CREATE OR REPLACE VIEW test_case_quality_summary AS
-SELECT 
-    tc.id,
-    tc.title,
-    tc.classification,
-    tc.classification_confidence,
-    qm.overall_score,
-    qm.confidence_level,
-    qm.validation_passed,
-    qm.benchmark_percentile,
-    us.domain_classification,
-    us.complexity_score,
-    COUNT(qa.id) as annotation_count,
-    AVG(qa.overall_quality_rating) as avg_human_rating,
-    tc.created_at
-FROM test_cases tc
-LEFT JOIN quality_metrics qm ON tc.id = qm.test_case_id
-LEFT JOIN user_stories us ON tc.user_story_id = us.id
-LEFT JOIN qa_annotations qa ON tc.id = qa.test_case_id
-GROUP BY tc.id, tc.title, tc.classification, tc.classification_confidence, 
-         qm.overall_score, qm.confidence_level, qm.validation_passed, qm.benchmark_percentile,
-         us.domain_classification, us.complexity_score, tc.created_at;
-
--- Grant access to the view
-GRANT SELECT ON test_case_quality_summary TO testgen_user;
+VALUES ('database', 'healthy', 'Database initialized successfully');
 
 -- Log successful initialization
 INSERT INTO system_health_log (component, status, message, metrics) 

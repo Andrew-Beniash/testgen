@@ -7,11 +7,11 @@ with sensible defaults for development.
 
 import os
 from typing import Optional, List
-from pydantic import BaseSettings, validator
-from pydantic_settings import BaseSettings as PydanticBaseSettings
+from pydantic import BaseModel, validator
+from pydantic_settings import BaseSettings
 
 
-class Settings(PydanticBaseSettings):
+class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     # Application settings
@@ -27,9 +27,12 @@ class Settings(PydanticBaseSettings):
     
     # Database settings
     DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost:5432/testgen"
+    DATABASE_TEST_URL: Optional[str] = None  # Separate test database
     DATABASE_POOL_SIZE: int = 20
     DATABASE_MAX_OVERFLOW: int = 30
     DATABASE_ECHO: bool = False
+    DATABASE_TIMEOUT: int = 30  # Connection timeout in seconds
+    DATABASE_RETRY_ATTEMPTS: int = 3
     
     # Redis settings
     REDIS_URL: str = "redis://localhost:6379/0"

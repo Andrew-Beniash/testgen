@@ -1,7 +1,5 @@
-version: '3.8'
-
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database with enhanced configuration
   postgres:
     image: postgres:15-alpine
     container_name: testgen_postgres
@@ -9,18 +7,69 @@ services:
       POSTGRES_DB: testgen_db
       POSTGRES_USER: testgen_user
       POSTGRES_PASSWORD: testgen_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+      # Performance tuning
+      POSTGRES_SHARED_BUFFERS: "256MB"
+      POSTGRES_EFFECTIVE_CACHE_SIZE: "1GB"
+      POSTGRES_WORK_MEM: "4MB"
+      POSTGRES_MAINTENANCE_WORK_MEM: "64MB"
+      POSTGRES_CHECKPOINT_COMPLETION_TARGET: "0.9"
+      POSTGRES_WAL_BUFFERS: "16MB"
+      POSTGRES_DEFAULT_STATISTICS_TARGET: "100"
     ports:
       - "5432:5432"
     volumes:
+      # Persistent data storage
       - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      # Database initialization script
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
+    # Enhanced health check
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U testgen_user -d testgen_db"]
+      test: |
+        pg_isready -U testgen_user -d testgen_db && \
+        psql -U testgen_user -d testgen_db -c "SELECT 1 FROM testgen.system_health_log LIMIT 1;" > /dev/null
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    restart: unless-stopped
     networks:
       - testgen_network
+    # Performance and security settings
+    shm_size: 256mb
+    command: [
+      "postgres",
+      "-c", "log_statement=all",
+      "-c", "log_destination=stderr",
+      "-c", "logging_collector=off",
+      "-c", "log_min_duration_statement=1000",
+      "-c", "shared_preload_libraries=pg_stat_statements",
+      "-c", "track_activity_query_size=2048",
+      "-c", "pg_stat_statements.track=all"
+    ]
+
+  # Test PostgreSQL Database (for testing environment)
+  postgres_test:
+    image: postgres:15-alpine
+    container_name: testgen_postgres_test
+    environment:
+      POSTGRES_DB: testgen_test_db
+      POSTGRES_USER: testgen_test_user
+      POSTGRES_PASSWORD: testgen_test_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testgen_test_user -d testgen_test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - testgen_network
+    profiles:
+      - testing
 
   # Redis Cache
   redis:
@@ -30,18 +79,19 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
     networks:
       - testgen_network
 
   # Qdrant Vector Database
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.7.3
     container_name: testgen_qdrant
     ports:
       - "6333:6333"
@@ -52,10 +102,12 @@ services:
       QDRANT__SERVICE__HTTP_PORT: 6333
       QDRANT__SERVICE__GRPC_PORT: 6334
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD-SHELL", "timeout 10s bash -c '</dev/tcp/localhost/6333' || exit 1"]
       interval: 30s
-      timeout: 10s
-      retries: 3
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
     networks:
       - testgen_network
 
@@ -69,15 +121,20 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://testgen_user:testgen_password@postgres:5432/testgen_db
+      - DATABASE_TEST_URL=postgresql+asyncpg://testgen_test_user:testgen_test_password@postgres_test:5432/testgen_test_db
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
       - DEBUG=true
       - ENVIRONMENT=development
       - LOG_LEVEL=INFO
       - LOG_FORMAT=json
+      - DATABASE_POOL_SIZE=20
+      - DATABASE_MAX_OVERFLOW=30
+      - DATABASE_ECHO=false
     volumes:
       - ./app:/app/app:ro
       - ./logs:/app/logs
+      - ./data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,83 +143,23 @@ services:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     restart: unless-stopped
     networks:
       - testgen_network
-
-  # Nginx Reverse Proxy (Optional for production)
-  nginx:
-    image: nginx:alpine
-    container_name: testgen_nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - backend
-    restart: unless-stopped
-    networks:
-      - testgen_network
-    profiles:
-      - production
-
-  # Prometheus for monitoring (Optional)
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: testgen_prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-    restart: unless-stopped
-    networks:
-      - testgen_network
-    profiles:
-      - monitoring
-
-  # Grafana for dashboards (Optional)
-  grafana:
-    image: grafana/grafana:latest
-    container_name: testgen_grafana
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-    restart: unless-stopped
-    networks:
-      - testgen_network
-    profiles:
-      - monitoring
 
 volumes:
   postgres_data:
     driver: local
+  postgres_test_data:
+    driver: local
   redis_data:
     driver: local
   qdrant_data:
-    driver: local
-  prometheus_data:
-    driver: local
-  grafana_data:
     driver: local
 
 networks:

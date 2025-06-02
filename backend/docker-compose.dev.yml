@@ -1,0 +1,49 @@
+# Docker Compose override for development
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  postgres:
+    environment:
+      # Enable more verbose logging for development
+      POSTGRES_LOG_STATEMENT: "all"
+      POSTGRES_LOG_MIN_DURATION_STATEMENT: "0"
+    volumes:
+      # Mount local data directory for development
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./logs/postgres:/var/log/postgresql
+    ports:
+      - "5432:5432"
+
+  postgres_test:
+    # Always include test database in development
+    profiles: []
+
+  backend:
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - DATABASE_ECHO=true
+    volumes:
+      # Mount source code for hot reloading
+      - ./app:/app/app
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./scripts:/app/scripts
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Database administration tool
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: testgen_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@testgen.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - testgen_network
+    profiles:
+      - tools

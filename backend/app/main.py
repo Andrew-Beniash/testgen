@@ -16,8 +16,10 @@ import time
 import uuid
 
 from app.core.config import settings
-from app.core.database import create_db_and_tables, close_db_connection
+from app.core.database import init_database, close_db_connection
 from app.utils.logging import setup_logging
+from app.utils.database_health import log_health_status
+from app.api.v1.endpoints.health import router as health_router
 
 
 # Set up logging
@@ -37,8 +39,16 @@ async def lifespan(app: FastAPI):
     
     try:
         # Initialize database
-        await create_db_and_tables()
+        await init_database()
         logger.info("Database initialized successfully")
+        
+        # Log successful startup
+        await log_health_status(
+            component="application_startup",
+            status="healthy",
+            message="Application started successfully",
+            metrics={"version": settings.APP_VERSION, "environment": settings.ENVIRONMENT}
+        )
         
         # Initialize services here (Redis, vector DB, etc.)
         logger.info("Services initialized successfully")
@@ -174,6 +184,7 @@ async def root():
 
 
 # Include API routers
+app.include_router(health_router, prefix="", tags=["health"])
 # from app.api.v1.api import api_router
 # app.include_router(api_router, prefix=settings.API_V1_STR)
 

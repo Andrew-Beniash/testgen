@@ -1,0 +1,83 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: testgen_postgres
+    environment:
+      POSTGRES_DB: testgen_db
+      POSTGRES_USER: testgen_user
+      POSTGRES_PASSWORD: testgen_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testgen_user -d testgen_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - testgen_network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: testgen_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - testgen_network
+
+  # FastAPI Backend (without Qdrant dependency for now)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: testgen_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://testgen_user:testgen_password@postgres:5432/testgen_db
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://localhost:6333
+      - DEBUG=true
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+    volumes:
+      - ./app:/app/app:ro
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - testgen_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  testgen_network:
+    driver: bridge
+    name: testgen_network

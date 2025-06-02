@@ -23,8 +23,8 @@ python-multipart==0.0.6
 httpx==0.25.2
 aiohttp==3.9.1
 
-# AI/ML dependencies
-openai==1.3.8
+# AI/ML dependencies - Updated versions to resolve conflicts
+openai==1.6.1
 langchain==0.0.350
 langchain-openai==0.0.2
 numpy==1.24.4
