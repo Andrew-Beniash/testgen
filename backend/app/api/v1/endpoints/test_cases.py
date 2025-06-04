@@ -199,7 +199,12 @@ async def mock_test_generation_service(
     ]
     
     # Calculate summary metrics
-    avg_quality = sum(tc.quality_metrics.overall_score for tc in filtered_cases) / len(filtered_cases)
+    if filtered_cases:
+        avg_quality = sum(
+            tc.quality_metrics.overall_score for tc in filtered_cases
+        ) / len(filtered_cases)
+    else:
+        avg_quality = 0.0
     
     summary = GenerationSummary(
         average_quality_score=avg_quality,
