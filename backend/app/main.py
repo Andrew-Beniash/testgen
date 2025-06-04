@@ -20,6 +20,7 @@ from app.core.database import init_database, close_db_connection
 from app.utils.logging import setup_logging
 from app.utils.database_health import log_health_status
 from app.api.v1.endpoints.health import router as health_router
+from app.api.v1.api import api_router
 
 
 # Set up logging
@@ -185,8 +186,7 @@ async def root():
 
 # Include API routers
 app.include_router(health_router, prefix="", tags=["health"])
-# from app.api.v1.api import api_router
-# app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     DATABASE_TIMEOUT: int = 30  # Connection timeout in seconds
     DATABASE_RETRY_ATTEMPTS: int = 3
     
+    # Alembic Migration settings
+    ALEMBIC_AUTO_MIGRATE: bool = True  # Run migrations automatically on startup in dev
+    ALEMBIC_MIGRATION_TARGET: str = "head"  # Target revision for migrations
+    ALEMBIC_SCRIPT_LOCATION: str = "alembic"  # Location of migration scripts
+    ALEMBIC_SKIP_SEEDING: bool = False  # Skip data seeding migrations
+    
     # Redis settings
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_CACHE_TTL: int = 3600  # 1 hour

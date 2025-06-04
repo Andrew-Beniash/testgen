@@ -282,6 +282,15 @@ async def init_database():
         # Create tables if they don't exist
         await create_db_and_tables()
         
+        # Run migrations if necessary
+        from app.utils.migrations import handle_automatic_migration
+        migration_success = await handle_automatic_migration()
+        
+        if not migration_success and settings.ENVIRONMENT != "production":
+            logger.warning("Automatic migration failed - continuing anyway")
+        elif not migration_success and settings.ENVIRONMENT == "production":
+            raise RuntimeError("Migration failed in production environment")
+        
         logger.info("Database initialization completed successfully")
         
     except Exception as e:
